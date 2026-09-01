@@ -1,0 +1,34 @@
+@import "tailwindcss";
+
+:root {
+  --background: #07070a;
+  --foreground: #e8e6e1;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-serif: var(--font-serif-jp);
+}
+
+body {
+  background:
+    radial-gradient(circle at 50% 20%, rgba(120, 130, 160, 0.05) 0%, transparent 55%),
+    var(--background);
+  color: var(--foreground);
+  font-family: var(--font-serif-jp), "Hiragino Mincho ProN", serif;
+}
+
+/* 呼吸するような、ごくゆっくりの明滅 */
+@keyframes breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.75; }
+}
+.breathe {
+  animation: breathe 6s ease-in-out infinite;
+}
+
+@keyframes waveform {
+  0%, 100% { transform: scaleY(0.4); }
+  50% { transform: scaleY(1); }
+}
