@@ -39,6 +39,13 @@ export class AmbientEngine {
     return !!this.ctx;
   }
 
+  // 現在鳴っているコードの「盛り上がり」を0〜1で返す（アバターのハミング演出用）
+  getBreathLevel(): number {
+    if (!this.ctx) return 0;
+    const elapsed = this.ctx.currentTime % CHORD_DURATION_SEC;
+    return Math.sin((elapsed / CHORD_DURATION_SEC) * Math.PI);
+  }
+
   async start() {
     if (this.ctx) return;
     const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;

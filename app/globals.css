@@ -32,3 +32,14 @@ body {
   0%, 100% { transform: scaleY(0.4); }
   50% { transform: scaleY(1); }
 }
+
+/* アバターの瞬き */
+@keyframes avatar-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  95% { transform: scaleY(0.08); }
+}
+.avatar-blink {
+  transform-origin: center;
+  transform-box: fill-box;
+  animation: avatar-blink 5.5s ease-in-out infinite;
+}

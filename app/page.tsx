@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AmbientEngine } from "@/lib/audio-engine";
+import { VoiceEngine } from "@/lib/voice-engine";
+import { Avatar, SPECIES_LABEL, type Species } from "@/components/Avatar";
+import { WaveformBars } from "@/components/WaveformBars";
 import {
   addUsedSeconds,
   canChat,
@@ -11,9 +14,19 @@ import {
 import { handleReturnFromCheckout, isBillingConfigured, openCheckout } from "@/lib/billing";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
-type Phase = "loading" | "nickname" | "chat";
+type Phase = "loading" | "avatarSelect" | "nickname" | "chat";
 
 const NICKNAME_KEY = "sanctuary-nickname";
+const SPECIES_KEY = "sanctuary-species";
+
+function introLines(name: string) {
+  return [
+    `……${name}さん。`,
+    "ここに来るまで、今日一日どれだけのものを飲み込んできたんだろうね。",
+    "よくここまですり減らして頑張ってきたね。",
+    "ここは、もう無理して話さなくていい場所だよ。",
+  ];
+}
 
 // よりそいホットライン（24時間・無料）。本当に必要な人だけが辿り着けるよう、
 // AIのセリフとしては一切言わせず、静かなUI要素としてのみ現れる。
@@ -36,26 +49,43 @@ export default function Home() {
   const [remainingSeconds, setRemainingSeconds] = useState(180);
   const [subscribed, setSubscribed] = useState(false);
 
+  const [species, setSpecies] = useState<Species>("dog");
+  const [voiceOn, setVoiceOn] = useState(true);
+
   const engineRef = useRef<AmbientEngine | null>(null);
+  const voiceRef = useRef<VoiceEngine | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   const showResource = explicitTriggered || ambiguousCount >= 3;
 
+  // 初回マウント時、localStorage/URLの状態をReactに取り込む（SSRとの
+  // hydrationミスマッチを避けるため、あえてlazy initializerではなくeffect側で行う）
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     handleReturnFromCheckout();
     setSubscribed(isSubscribed());
     setRemainingSeconds(getRemainingFreeSeconds());
-    const saved = typeof window !== "undefined" ? localStorage.getItem(NICKNAME_KEY) : null;
-    if (saved) {
-      setNickname(saved);
+    if (!voiceRef.current) voiceRef.current = new VoiceEngine();
+    setVoiceOn(voiceRef.current.isEnabled());
+
+    const savedNickname = typeof window !== "undefined" ? localStorage.getItem(NICKNAME_KEY) : null;
+    const savedSpecies = typeof window !== "undefined" ? (localStorage.getItem(SPECIES_KEY) as Species | null) : null;
+    if (savedSpecies) setSpecies(savedSpecies);
+
+    if (savedSpecies && savedNickname) {
+      setNickname(savedNickname);
       setPhase("chat");
-    } else {
+    } else if (savedSpecies) {
       setPhase("nickname");
+    } else {
+      setPhase("avatarSelect");
     }
     return () => {
       engineRef.current?.stop();
+      voiceRef.current?.stop();
     };
   }, []);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // チャット画面にいる間だけ、環境音を流す
   useEffect(() => {
@@ -63,6 +93,34 @@ export default function Home() {
     if (!engineRef.current) engineRef.current = new AmbientEngine();
     engineRef.current.start();
   }, [phase]);
+
+  // チャット開始時、最初の語りかけを一度だけ声に出す
+  useEffect(() => {
+    if (phase !== "chat" || messages.length !== 0) return;
+    voiceRef.current?.speak(introLines(nickname).join("\n"));
+  }, [phase]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  function chooseSpecies(s: Species) {
+    setSpecies(s);
+    try {
+      localStorage.setItem(SPECIES_KEY, s);
+    } catch {
+      /* noop */
+    }
+    const savedNickname = typeof window !== "undefined" ? localStorage.getItem(NICKNAME_KEY) : null;
+    if (savedNickname) {
+      setNickname(savedNickname);
+      setPhase("chat");
+    } else {
+      setPhase("nickname");
+    }
+  }
+
+  function toggleVoice() {
+    const next = !voiceOn;
+    setVoiceOn(next);
+    voiceRef.current?.setEnabled(next);
+  }
 
   // 無料枠のタイマー（サブスク中はカウントしない）
   useEffect(() => {
@@ -113,6 +171,7 @@ export default function Home() {
       }
 
       setMessages((m) => [...m, { role: "assistant", content: data.reply }]);
+      voiceRef.current?.speak(data.reply);
       if (data.risk === "explicit") setExplicitTriggered(true);
       else if (data.risk === "ambiguous") setAmbiguousCount((c) => c + 1);
     } catch {
@@ -124,6 +183,28 @@ export default function Home() {
 
   if (phase === "loading") {
     return <div className="flex-1" />;
+  }
+
+  if (phase === "avatarSelect") {
+    return (
+      <main className="flex-1 flex flex-col items-center justify-center px-6">
+        <div className="w-2 h-2 rounded-full bg-[#8b93a8] breathe mb-10" />
+        <p className="text-sm text-[#9a97a0] mb-8 text-center leading-loose">
+          そばにいてほしい子を、選んでください。
+        </p>
+        <div className="flex gap-6">
+          {(Object.keys(SPECIES_LABEL) as Species[]).map((s) => (
+            <button
+              key={s}
+              onClick={() => chooseSpecies(s)}
+              className="text-sm tracking-widest text-[#6a6878] hover:text-[#9a97a0] border border-[#3a3942] rounded-full px-6 py-3 transition-colors"
+            >
+              {SPECIES_LABEL[s]}
+            </button>
+          ))}
+        </div>
+      </main>
+    );
   }
 
   if (phase === "nickname") {
@@ -159,26 +240,38 @@ export default function Home() {
   const seconds = remainingSeconds % 60;
 
   return (
-    <main className="flex-1 flex flex-col max-w-lg w-full mx-auto px-5">
+    <>
+      <Avatar species={species} voiceRef={voiceRef} ambientRef={engineRef} />
+      <main className="flex-1 flex flex-col max-w-lg w-full mx-auto px-5 bg-black/35">
       <header className="pt-8 pb-4 flex items-center justify-between">
-        <div className="w-1.5 h-1.5 rounded-full bg-[#8b93a8] breathe" />
-        {!subscribed && (
-          <span className="text-[10px] text-[#5a5862] tabular-nums">
-            {timeUp ? "0:00" : `${minutes}:${seconds.toString().padStart(2, "0")}`}
-          </span>
-        )}
+        <div className="flex items-center gap-3">
+          <div className="w-1.5 h-1.5 rounded-full bg-[#8b93a8] breathe" />
+          <WaveformBars voiceRef={voiceRef} />
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={toggleVoice}
+            className="text-[10px] text-[#5a5862] hover:text-[#9a97a0] transition-colors"
+          >
+            {voiceOn ? "声を止める" : "声を出す"}
+          </button>
+          {!subscribed && (
+            <span className="text-[10px] text-[#5a5862] tabular-nums">
+              {timeUp ? "0:00" : `${minutes}:${seconds.toString().padStart(2, "0")}`}
+            </span>
+          )}
+        </div>
       </header>
 
       <div className="flex-1 overflow-y-auto py-4 space-y-5">
         {messages.length === 0 && (
           <p className="text-sm text-[#9a97a0] leading-loose text-center mt-16">
-            ……{nickname}さん。
-            <br />
-            ここに来るまで、今日一日どれだけのものを飲み込んできたんだろうね。
-            <br />
-            よくここまですり減らして頑張ってきたね。
-            <br />
-            ここは、もう無理して話さなくていい場所だよ。
+            {introLines(nickname).map((line, i) => (
+              <span key={i}>
+                {line}
+                <br />
+              </span>
+            ))}
           </p>
         )}
         {messages.map((m, i) => (
@@ -257,6 +350,7 @@ export default function Home() {
           </div>
         )}
       </div>
-    </main>
+      </main>
+    </>
   );
 }
