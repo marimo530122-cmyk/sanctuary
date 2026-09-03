@@ -51,6 +51,9 @@ export default function Home() {
 
   const [species, setSpecies] = useState<Species>("dog");
   const [voiceOn, setVoiceOn] = useState(true);
+  const [presenceOn, setPresenceOn] = useState(false);
+  const [presencePending, setPresencePending] = useState(false);
+  const [presenceDenied, setPresenceDenied] = useState(false);
 
   const engineRef = useRef<AmbientEngine | null>(null);
   const voiceRef = useRef<VoiceEngine | null>(null);
@@ -120,6 +123,22 @@ export default function Home() {
     const next = !voiceOn;
     setVoiceOn(next);
     voiceRef.current?.setEnabled(next);
+  }
+
+  // マイクの「気配（音量だけ）」への呼応。録音・送信は一切しないが、
+  // ブラウザの許可ダイアログが出るため、必ずユーザーの明示操作でのみ有効化する
+  async function togglePresence() {
+    if (presencePending) return;
+    if (presenceOn) {
+      engineRef.current?.stopPresenceSensing();
+      setPresenceOn(false);
+      return;
+    }
+    setPresencePending(true);
+    const ok = (await engineRef.current?.enablePresenceSensing()) ?? false;
+    setPresencePending(false);
+    setPresenceOn(ok);
+    setPresenceDenied(!ok);
   }
 
   // 無料枠のタイマー（サブスク中はカウントしない）
@@ -250,6 +269,14 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-3">
           <button
+            onClick={togglePresence}
+            disabled={presencePending}
+            title="マイクの音量だけを見ます。録音や送信は一切しません"
+            className="text-[10px] text-[#5a5862] hover:text-[#9a97a0] disabled:opacity-40 transition-colors"
+          >
+            {presencePending ? "……" : presenceOn ? "気配に呼応中" : "気配に呼応する"}
+          </button>
+          <button
             onClick={toggleVoice}
             className="text-[10px] text-[#5a5862] hover:text-[#9a97a0] transition-colors"
           >
@@ -262,6 +289,12 @@ export default function Home() {
           )}
         </div>
       </header>
+
+      {presenceDenied && (
+        <p className="text-[10px] text-[#5a5862] text-right -mt-2 mb-2">
+          マイクを使えなかったみたい。ブラウザの設定からいつでも許可できます
+        </p>
+      )}
 
       <div className="flex-1 overflow-y-auto py-4 space-y-5">
         {messages.length === 0 && (
