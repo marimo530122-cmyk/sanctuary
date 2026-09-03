@@ -37,6 +37,9 @@ function introLines(name: string) {
 // AIのセリフとしては一切言わせず、静かなUI要素としてのみ現れる。
 const RESOURCE_LABEL = "→ もしもの時は";
 const RESOURCE_TEXT = "よりそいホットライン　0120-279-338（24時間・無料）";
+// 今すぐ身の安全・救助が必要な、一刻を争う場面のための導線。相談窓口（上記）だけでは
+// 間に合わない状況を想定し、威圧的にならないよう同じ静かな展開の中にそっと添える
+const EMERGENCY_TEXT = "今すぐ安全の確保が必要なときは　110番（警察）・119番（救急）";
 
 export default function Home() {
   const [phase, setPhase] = useState<Phase>("loading");
@@ -381,7 +384,10 @@ export default function Home() {
         {showResource && (
           <div className="mt-3 text-right">
             {resourceOpen ? (
-              <p className="text-[10px] text-[#7a7882]">{RESOURCE_TEXT}</p>
+              <div className="text-[10px] text-[#7a7882] space-y-1">
+                <p>{RESOURCE_TEXT}</p>
+                <p>{EMERGENCY_TEXT}</p>
+              </div>
             ) : (
               <button
                 onClick={() => setResourceOpen(true)}
