@@ -11,7 +11,12 @@ import {
   getRemainingFreeSeconds,
   isSubscribed,
 } from "@/lib/session";
-import { handleReturnFromCheckout, isBillingConfigured, openCheckout } from "@/lib/billing";
+import {
+  handleReturnFromCheckout,
+  isBillingConfigured,
+  openCheckout,
+  refreshSubscriptionStatus,
+} from "@/lib/billing";
 
 type ChatMessage = { role: "user" | "assistant"; content: string };
 type Phase = "loading" | "avatarSelect" | "nickname" | "chat";
@@ -63,32 +68,37 @@ export default function Home() {
 
   // 初回マウント時、localStorage/URLの状態をReactに取り込む（SSRとの
   // hydrationミスマッチを避けるため、あえてlazy initializerではなくeffect側で行う）
-  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    handleReturnFromCheckout();
-    setSubscribed(isSubscribed());
-    setRemainingSeconds(getRemainingFreeSeconds());
-    if (!voiceRef.current) voiceRef.current = new VoiceEngine();
-    setVoiceOn(voiceRef.current.isEnabled());
+    async function init() {
+      // サーバーでの検証が終わるまで、解放の判定を確定させない
+      await handleReturnFromCheckout();
+      setSubscribed(isSubscribed());
+      setRemainingSeconds(getRemainingFreeSeconds());
+      if (!voiceRef.current) voiceRef.current = new VoiceEngine();
+      setVoiceOn(voiceRef.current.isEnabled());
 
-    const savedNickname = typeof window !== "undefined" ? localStorage.getItem(NICKNAME_KEY) : null;
-    const savedSpecies = typeof window !== "undefined" ? (localStorage.getItem(SPECIES_KEY) as Species | null) : null;
-    if (savedSpecies) setSpecies(savedSpecies);
+      const savedNickname = typeof window !== "undefined" ? localStorage.getItem(NICKNAME_KEY) : null;
+      const savedSpecies = typeof window !== "undefined" ? (localStorage.getItem(SPECIES_KEY) as Species | null) : null;
+      if (savedSpecies) setSpecies(savedSpecies);
 
-    if (savedSpecies && savedNickname) {
-      setNickname(savedNickname);
-      setPhase("chat");
-    } else if (savedSpecies) {
-      setPhase("nickname");
-    } else {
-      setPhase("avatarSelect");
+      if (savedSpecies && savedNickname) {
+        setNickname(savedNickname);
+        setPhase("chat");
+      } else if (savedSpecies) {
+        setPhase("nickname");
+      } else {
+        setPhase("avatarSelect");
+      }
+
+      // 解約検知: 裏で問い合わせ、有効でなくなっていたら解放を取り消す(頻度は絞って実行)
+      refreshSubscriptionStatus().then(() => setSubscribed(isSubscribed()));
     }
+    init();
     return () => {
       engineRef.current?.stop();
       voiceRef.current?.stop();
     };
   }, []);
-  /* eslint-enable react-hooks/set-state-in-effect */
 
   // チャット画面にいる間だけ、環境音を流す
   useEffect(() => {
