@@ -84,6 +84,20 @@ function Topper({ species, fill }: { species: Species; fill: string }) {
   }
 }
 
+// 簡易ビゼーム(母音の口形)morph: openness(口の開き)とwidth(0=お/う寄りの
+// 丸い口、1=い/え寄りの横に広い口)から、単なる楕円の拡大縮小ではなく
+// 母音ごとに異なる口の輪郭をベジェ曲線で生成する（lib/voice-engine.ts参照）
+function mouthPath(cx: number, cy: number, openness: number, width: number): string {
+  const rx = 14 + width * 16; // 14(丸い)〜30(横に広い)
+  const ry = 3 + openness * 25;
+  const curl = (0.5 - width) * 5; // 丸い口ほど、口角がわずかに上がって見えるように
+  const left = cx - rx;
+  const right = cx + rx;
+  const top = cy - ry - curl;
+  const bottom = cy + ry - curl;
+  return `M ${left} ${cy - curl} C ${left} ${top}, ${right} ${top}, ${right} ${cy - curl} C ${right} ${bottom}, ${left} ${bottom}, ${left} ${cy - curl} Z`;
+}
+
 export function Avatar({
   species,
   voiceRef,
@@ -93,7 +107,7 @@ export function Avatar({
   voiceRef: React.RefObject<VoiceEngine | null>;
   ambientRef: React.RefObject<AmbientEngine | null>;
 }) {
-  const mouthRef = useRef<SVGEllipseElement | null>(null);
+  const mouthRef = useRef<SVGPathElement | null>(null);
   const tongueRef = useRef<SVGEllipseElement | null>(null);
   const chestRef = useRef<SVGEllipseElement | null>(null);
   const glowRef = useRef<SVGCircleElement | null>(null);
@@ -110,8 +124,10 @@ export function Avatar({
       // 発話中はしっかり口が動く。発話していないときは、環境音のハミングに
       // 合わせてごくわずかに口・胸元が動く程度に抑える
       const openness = Math.max(speaking, breath * 0.16);
+      // 発話していないとき(ハミング中)は中立(0.5=丸くも広くもない)の口形にする
+      const width = speaking > 0.03 ? voiceRef.current?.getMouthWidth() ?? 0.5 : 0.5;
 
-      if (mouthRef.current) mouthRef.current.setAttribute("ry", String(4 + openness * 26));
+      if (mouthRef.current) mouthRef.current.setAttribute("d", mouthPath(200, 278, openness, width));
       if (tongueRef.current) {
         const tongueOpacity = openness > 0.45 ? Math.min(1, (openness - 0.45) * 2) : 0;
         tongueRef.current.setAttribute("opacity", String(tongueOpacity));
@@ -190,8 +206,8 @@ export function Avatar({
           <ellipse cx="200" cy="248" rx="4" ry="6" fill={cfg.topperFill} opacity="0.4" />
         )}
 
-        {/* 口（音声の音量に連動して開閉） */}
-        <ellipse ref={mouthRef} cx="200" cy="278" rx="26" ry="4" fill={cfg.mouthFill} />
+        {/* 口（音声の音量・周波数分布に連動して開閉+母音の形が変わる簡易ビゼーム） */}
+        <path ref={mouthRef} d={mouthPath(200, 278, 0, 0.5)} fill={cfg.mouthFill} />
         {cfg.hasTongue && <ellipse ref={tongueRef} cx="200" cy="286" rx="14" ry="9" fill="#c96a7a" opacity="0" />}
       </svg>
     </div>

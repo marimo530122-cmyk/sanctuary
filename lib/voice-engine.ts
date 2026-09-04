@@ -23,6 +23,11 @@ const VOICE_ENABLED_KEY = "sanctuary-voice-enabled";
 export class VoiceEngine {
   private mouthOpenness = 0;
   private targetOpenness = 0;
+  // 口の「開き」(openness)に加えて、母音の広がり方(width: 0=お/う寄りの
+  // 丸い口、1=い/え寄りの横に広い口)を別軸として持つことで、単なる
+  // 楕円の拡大縮小ではなく簡易的なビゼーム(母音の口形)morphを行う。
+  private mouthWidth = 0.5;
+  private targetWidth = 0.5;
   private rafId: number | null = null;
   private fallbackTimer: ReturnType<typeof setInterval> | null = null;
   private lastBoundaryAt = 0;
@@ -34,6 +39,7 @@ export class VoiceEngine {
   private audioCtx: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
   private analyserData: Uint8Array<ArrayBuffer> | null = null;
+  private freqData: Uint8Array<ArrayBuffer> | null = null;
   private activeSource: AudioBufferSourceNode | null = null;
   private usingPremium = false;
 
@@ -123,6 +129,7 @@ export class VoiceEngine {
 
       this.analyser = analyser;
       this.analyserData = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
+      this.freqData = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
       this.activeSource = source;
       this.speaking = true;
       this.usingPremium = true;
@@ -140,7 +147,7 @@ export class VoiceEngine {
   private startPremiumLoop() {
     if (this.rafId) return;
     const tick = () => {
-      if (!this.analyser || !this.analyserData) return;
+      if (!this.analyser || !this.analyserData || !this.freqData) return;
       this.analyser.getByteTimeDomainData(this.analyserData);
       let sum = 0;
       for (let i = 0; i < this.analyserData.length; i++) {
@@ -149,6 +156,23 @@ export class VoiceEngine {
       }
       const rms = Math.sqrt(sum / this.analyserData.length);
       this.mouthOpenness = Math.min(1, rms * 3.4);
+
+      // 簡易ビゼーム推定: 周波数分布の「重心」が低い(低域中心)ほど
+      // お・う寄りの丸い口、高い(高域寄り)ほどい・え寄りの横に広い口、
+      // として mouthWidth に反映する（厳密な音素認識ではなく、あくまで
+      // 見た目のバリエーションを増やすための近似）
+      this.analyser.getByteFrequencyData(this.freqData);
+      let weighted = 0;
+      let total = 0;
+      for (let i = 0; i < this.freqData.length; i++) {
+        weighted += i * this.freqData[i];
+        total += this.freqData[i];
+      }
+      if (total > 20) {
+        const centroid = weighted / total / this.freqData.length; // 0..1
+        this.targetWidth = Math.min(1, Math.max(0, centroid * 2.2));
+      }
+      this.mouthWidth += (this.targetWidth - this.mouthWidth) * 0.25;
 
       if (this.speaking) {
         this.rafId = requestAnimationFrame(tick);
@@ -232,6 +256,18 @@ export class VoiceEngine {
       const rate = this.mouthOpenness < this.targetOpenness ? 0.55 : 0.12;
       this.mouthOpenness += (this.targetOpenness - this.mouthOpenness) * rate;
       this.targetOpenness *= 0.85;
+
+      // フォールバック経路は実際の音声波形を解析できないため、口の広がり
+      // (mouthWidth)は実データではなく、発話中だけゆっくり往復させる疑似
+      // 演出にとどめる（本物の母音判定ではないことに注意。voice-engine.ts
+      // 冒頭のコメント参照）
+      if (this.speaking) {
+        this.targetWidth = 0.35 + (Math.sin(performance.now() / 170) + 1) * 0.15;
+      } else {
+        this.targetWidth = 0.5;
+      }
+      this.mouthWidth += (this.targetWidth - this.mouthWidth) * 0.15;
+
       if (this.mouthOpenness < 0.02 && !this.speaking) {
         this.mouthOpenness = 0;
         this.rafId = null;
@@ -247,6 +283,7 @@ export class VoiceEngine {
   private finishSpeaking() {
     this.speaking = false;
     this.targetOpenness = 0;
+    this.targetWidth = 0.5;
     if (this.fallbackTimer) clearInterval(this.fallbackTimer);
     this.fallbackTimer = null;
     this.activeSource = null;
@@ -268,5 +305,10 @@ export class VoiceEngine {
 
   getMouthOpenness() {
     return this.mouthOpenness;
+  }
+
+  // 0=お・う寄りの丸い口、1=い・え寄りの横に広い口（セクション「共通」参照）
+  getMouthWidth() {
+    return this.mouthWidth;
   }
 }
