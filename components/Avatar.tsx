@@ -36,6 +36,16 @@ type SpeciesConfig = {
   noseStyle: "snout" | "small";
 };
 
+// 写実アバター（男性・女性のみ）: Geminiで生成した、本人が確認済みの
+// 写真を使う。犬・猫・くまは写真の対象がないため、引き続き下のSVGのまま。
+// 口の形を複数枚生成すると顔立ちが微妙にズレて不自然になりやすいため、
+// 口パクの代わりに話している間だけ画面全体がやわらかく発光する演出にする
+// （音への反応は派手にしない、というlib/audio-engine.tsの方針を踏襲）。
+const PHOTO_SPECIES: Partial<Record<Species, string>> = {
+  man: "/avatars/man.jpg",
+  woman: "/avatars/woman.jpg",
+};
+
 const SPECIES_CONFIG: Record<Species, SpeciesConfig> = {
   dog: { headFill: "#c9a877", topperFill: "#a9865c", cheekFill: "#e8a0a0", mouthFill: "#4a2e2e", hasTongue: true, noseStyle: "snout" },
   cat: { headFill: "#9a9aa8", topperFill: "#7d7d8c", cheekFill: "#e8a0a0", mouthFill: "#4a2e2e", hasTongue: true, noseStyle: "snout" },
@@ -115,6 +125,7 @@ export function Avatar({
   const pupilRRef = useRef<SVGCircleElement | null>(null);
   const browLRef = useRef<SVGPathElement | null>(null);
   const browRRef = useRef<SVGPathElement | null>(null);
+  const photoGlowRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let raf: number;
@@ -135,6 +146,12 @@ export function Avatar({
       if (chestRef.current) chestRef.current.setAttribute("ry", String(46 + breath * 4));
       if (glowRef.current) glowRef.current.setAttribute("opacity", String(0.12 + breath * 0.08));
 
+      // 写実アバター用: 話しているときだけ、ごくやわらかく発光を強める
+      if (photoGlowRef.current) {
+        const glowOpacity = 0.1 + breath * 0.05 + speaking * 0.3;
+        photoGlowRef.current.style.opacity = String(Math.min(0.55, glowOpacity));
+      }
+
       // 視線のゆっくりしたドリフト（生きている感じを出すための微細な揺らぎ）
       const sec = t / 1000;
       const gazeX = Math.sin(sec * 0.35) * 2.6 + Math.sin(sec * 0.11) * 1.2;
@@ -154,6 +171,19 @@ export function Avatar({
   }, [voiceRef, ambientRef]);
 
   const cfg = SPECIES_CONFIG[species];
+  const photoSrc = PHOTO_SPECIES[species];
+
+  if (photoSrc) {
+    return (
+      <div className="fixed inset-0 -z-10 overflow-hidden bg-[#07070a]">
+        <div className="avatar-photo-motion absolute inset-0">
+          {/* eslint-disable-next-line @next/next/no-img-element -- 固定の少数枚のみで、next/image最適化の恩恵が薄いため */}
+          <img src={photoSrc} alt="" className="h-full w-full object-cover" />
+        </div>
+        <div ref={photoGlowRef} className="avatar-photo-glow pointer-events-none absolute inset-0" style={{ opacity: 0.1 }} />
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 -z-10 flex items-center justify-center overflow-hidden">

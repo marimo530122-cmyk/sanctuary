@@ -43,3 +43,25 @@ body {
   transform-box: fill-box;
   animation: avatar-blink 5.5s ease-in-out infinite;
 }
+
+/* 写実アバター（男性・女性）: 静止画をゆっくりズームさせ、
+   落ち着いた場所に生きている気配を出す。派手な反応にはしない
+   （lib/audio-engine.tsの設計方針と同じ） */
+@keyframes avatar-photo-kenburns {
+  0%   { transform: scale(1) translate(0, 0); }
+  100% { transform: scale(1.06) translate(-1%, -0.6%); }
+}
+.avatar-photo-motion {
+  animation: avatar-photo-kenburns 26s ease-in-out infinite alternate;
+  transform-origin: 50% 35%;
+}
+.avatar-photo-glow {
+  background: radial-gradient(ellipse at 50% 40%, rgba(201, 154, 110, 0.5) 0%, transparent 70%);
+  transition: opacity 0.6s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar-photo-motion {
+    animation: none;
+  }
+}
