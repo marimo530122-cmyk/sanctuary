@@ -36,6 +36,16 @@ type SpeciesConfig = {
   noseStyle: "snout" | "small";
 };
 
+// 写実アバター（男性・女性のみ）: Geminiで生成した、本人が確認済みの
+// 写真を使う。犬・猫・くまは写真の対象がないため、引き続き下のSVGのまま。
+// 口の形を複数枚生成すると顔立ちが微妙にズレて不自然になりやすいため、
+// 口パクの代わりに話している間だけ画面全体がやわらかく発光する演出にする
+// （音への反応は派手にしない、というlib/audio-engine.tsの方針を踏襲）。
+const PHOTO_SPECIES: Partial<Record<Species, string>> = {
+  man: "/avatars/man.jpg",
+  woman: "/avatars/woman.jpg",
+};
+
 const SPECIES_CONFIG: Record<Species, SpeciesConfig> = {
   dog: { headFill: "#c9a877", topperFill: "#a9865c", cheekFill: "#e8a0a0", mouthFill: "#4a2e2e", hasTongue: true, noseStyle: "snout" },
   cat: { headFill: "#9a9aa8", topperFill: "#7d7d8c", cheekFill: "#e8a0a0", mouthFill: "#4a2e2e", hasTongue: true, noseStyle: "snout" },
@@ -84,6 +94,20 @@ function Topper({ species, fill }: { species: Species; fill: string }) {
   }
 }
 
+// 簡易ビゼーム(母音の口形)morph: openness(口の開き)とwidth(0=お/う寄りの
+// 丸い口、1=い/え寄りの横に広い口)から、単なる楕円の拡大縮小ではなく
+// 母音ごとに異なる口の輪郭をベジェ曲線で生成する（lib/voice-engine.ts参照）
+function mouthPath(cx: number, cy: number, openness: number, width: number): string {
+  const rx = 14 + width * 16; // 14(丸い)〜30(横に広い)
+  const ry = 3 + openness * 25;
+  const curl = (0.5 - width) * 5; // 丸い口ほど、口角がわずかに上がって見えるように
+  const left = cx - rx;
+  const right = cx + rx;
+  const top = cy - ry - curl;
+  const bottom = cy + ry - curl;
+  return `M ${left} ${cy - curl} C ${left} ${top}, ${right} ${top}, ${right} ${cy - curl} C ${right} ${bottom}, ${left} ${bottom}, ${left} ${cy - curl} Z`;
+}
+
 export function Avatar({
   species,
   voiceRef,
@@ -93,7 +117,7 @@ export function Avatar({
   voiceRef: React.RefObject<VoiceEngine | null>;
   ambientRef: React.RefObject<AmbientEngine | null>;
 }) {
-  const mouthRef = useRef<SVGEllipseElement | null>(null);
+  const mouthRef = useRef<SVGPathElement | null>(null);
   const tongueRef = useRef<SVGEllipseElement | null>(null);
   const chestRef = useRef<SVGEllipseElement | null>(null);
   const glowRef = useRef<SVGCircleElement | null>(null);
@@ -101,6 +125,7 @@ export function Avatar({
   const pupilRRef = useRef<SVGCircleElement | null>(null);
   const browLRef = useRef<SVGPathElement | null>(null);
   const browRRef = useRef<SVGPathElement | null>(null);
+  const photoGlowRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let raf: number;
@@ -110,14 +135,22 @@ export function Avatar({
       // 発話中はしっかり口が動く。発話していないときは、環境音のハミングに
       // 合わせてごくわずかに口・胸元が動く程度に抑える
       const openness = Math.max(speaking, breath * 0.16);
+      // 発話していないとき(ハミング中)は中立(0.5=丸くも広くもない)の口形にする
+      const width = speaking > 0.03 ? voiceRef.current?.getMouthWidth() ?? 0.5 : 0.5;
 
-      if (mouthRef.current) mouthRef.current.setAttribute("ry", String(4 + openness * 26));
+      if (mouthRef.current) mouthRef.current.setAttribute("d", mouthPath(200, 278, openness, width));
       if (tongueRef.current) {
         const tongueOpacity = openness > 0.45 ? Math.min(1, (openness - 0.45) * 2) : 0;
         tongueRef.current.setAttribute("opacity", String(tongueOpacity));
       }
       if (chestRef.current) chestRef.current.setAttribute("ry", String(46 + breath * 4));
       if (glowRef.current) glowRef.current.setAttribute("opacity", String(0.12 + breath * 0.08));
+
+      // 写実アバター用: 話しているときだけ、ごくやわらかく発光を強める
+      if (photoGlowRef.current) {
+        const glowOpacity = 0.1 + breath * 0.05 + speaking * 0.3;
+        photoGlowRef.current.style.opacity = String(Math.min(0.55, glowOpacity));
+      }
 
       // 視線のゆっくりしたドリフト（生きている感じを出すための微細な揺らぎ）
       const sec = t / 1000;
@@ -138,6 +171,19 @@ export function Avatar({
   }, [voiceRef, ambientRef]);
 
   const cfg = SPECIES_CONFIG[species];
+  const photoSrc = PHOTO_SPECIES[species];
+
+  if (photoSrc) {
+    return (
+      <div className="fixed inset-0 -z-10 overflow-hidden bg-[#07070a]">
+        <div className="avatar-photo-motion absolute inset-0">
+          {/* eslint-disable-next-line @next/next/no-img-element -- 固定の少数枚のみで、next/image最適化の恩恵が薄いため */}
+          <img src={photoSrc} alt="" className="h-full w-full object-cover" />
+        </div>
+        <div ref={photoGlowRef} className="avatar-photo-glow pointer-events-none absolute inset-0" style={{ opacity: 0.1 }} />
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 -z-10 flex items-center justify-center overflow-hidden">
@@ -190,8 +236,8 @@ export function Avatar({
           <ellipse cx="200" cy="248" rx="4" ry="6" fill={cfg.topperFill} opacity="0.4" />
         )}
 
-        {/* 口（音声の音量に連動して開閉） */}
-        <ellipse ref={mouthRef} cx="200" cy="278" rx="26" ry="4" fill={cfg.mouthFill} />
+        {/* 口（音声の音量・周波数分布に連動して開閉+母音の形が変わる簡易ビゼーム） */}
+        <path ref={mouthRef} d={mouthPath(200, 278, 0, 0.5)} fill={cfg.mouthFill} />
         {cfg.hasTongue && <ellipse ref={tongueRef} cx="200" cy="286" rx="14" ry="9" fill="#c96a7a" opacity="0" />}
       </svg>
     </div>
